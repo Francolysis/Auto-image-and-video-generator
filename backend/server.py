@@ -16,7 +16,8 @@ import base64
 import zipfile
 import tempfile
 import asyncio
-from emergentintegrations.llm.gemeni.image_generation import GeminiImageGeneration
+import aiohttp
+import json
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,9 +33,10 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Initialize Gemini Image Generation
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-image_gen = GeminiImageGeneration(api_key=GEMINI_API_KEY)
+# Cloudflare Workers AI Configuration
+CLOUDFLARE_ACCOUNT_ID = os.environ.get('CLOUDFLARE_ACCOUNT_ID')
+CLOUDFLARE_API_TOKEN = os.environ.get('CLOUDFLARE_API_TOKEN')
+CLOUDFLARE_API_BASE = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run"
 
 # Define Models
 class ImagePrompt(BaseModel):
@@ -59,6 +61,57 @@ class GenerationRequest(BaseModel):
 
 # Storage for jobs (in production, use database)
 jobs_storage = {}
+
+def get_image_dimensions(aspect_ratio: str):
+    """Convert aspect ratio to width/height dimensions"""
+    ratio_map = {
+        "1:1": (1024, 1024),
+        "16:9": (1344, 768),
+        "9:16": (768, 1344),
+        "4:3": (1152, 896),
+        "3:4": (896, 1152),
+        "21:9": (1536, 640)
+    }
+    return ratio_map.get(aspect_ratio, (1024, 1024))
+
+async def generate_single_image(prompt: str, style: str, aspect_ratio: str):
+    """Generate a single image using Cloudflare Workers AI"""
+    width, height = get_image_dimensions(aspect_ratio)
+    
+    # Create enhanced prompt with style
+    enhanced_prompt = f"{prompt}, {style} style, high quality, detailed"
+    
+    payload = {
+        "prompt": enhanced_prompt,
+        "width": width,
+        "height": height,
+        "num_steps": 20,
+        "strength": 0.8,
+        "guidance": 7.5
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{CLOUDFLARE_API_BASE}/@cf/stabilityai/stable-diffusion-xl-base-1.0",
+            headers=headers,
+            json=payload
+        ) as response:
+            if response.status == 200:
+                result = await response.json()
+                if result.get("success") and result.get("result"):
+                    # The image is returned as base64 encoded data
+                    image_data = result["result"][0]  # First image from result
+                    return base64.b64decode(image_data)
+                else:
+                    raise Exception(f"API returned no image data: {result}")
+            else:
+                error_text = await response.text()
+                raise Exception(f"Cloudflare API error {response.status}: {error_text}")
 
 @api_router.get("/")
 async def root():
@@ -119,23 +172,20 @@ async def process_image_generation(job_id: str):
     try:
         for i, prompt_obj in enumerate(job.prompts):
             try:
-                # Enhance prompt with style and aspect ratio
-                enhanced_prompt = f"{prompt_obj.prompt}, {prompt_obj.style} style"
-                
-                # Generate image using Gemini
-                images = await image_gen.generate_images(
-                    prompt=enhanced_prompt,
-                    model="imagen-3.0-generate-002",
-                    number_of_images=1
+                # Generate image using Cloudflare Workers AI
+                image_data = await generate_single_image(
+                    prompt_obj.prompt, 
+                    prompt_obj.style, 
+                    prompt_obj.aspect_ratio
                 )
                 
-                if images and len(images) > 0:
+                if image_data:
                     # Save image
-                    image_filename = f"image_{i+1:03d}.png"
+                    image_filename = f"image_{i+1:03d}_{prompt_obj.prompt[:30].replace(' ', '_')}.png"
                     image_path = os.path.join(temp_dir, image_filename)
                     
                     with open(image_path, "wb") as f:
-                        f.write(images[0])
+                        f.write(image_data)
                     
                     generated_images.append(image_path)
                     
@@ -151,7 +201,7 @@ async def process_image_generation(job_id: str):
         
         # Create zip file
         if generated_images:
-            zip_filename = f"generated_images_{job_id}.zip"
+            zip_filename = f"youtube_images_{job_id}.zip"
             zip_path = os.path.join(temp_dir, zip_filename)
             
             with zipfile.ZipFile(zip_path, 'w') as zipf:
