@@ -201,9 +201,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Image Generation Endpoint"
+    []
   stuck_tasks:
-    - "Image Generation Endpoint"
+    []
   test_all: false
   test_priority: "high_first"
 
