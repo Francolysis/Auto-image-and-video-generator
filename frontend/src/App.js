@@ -18,9 +18,11 @@ function App() {
 
   const styles = [
     "photorealistic",
-    "artistic",
+    "artistic", 
     "cartoon",
     "anime",
+    "anthropomorphic",
+    "zootopia",
     "oil painting",
     "watercolor",
     "digital art",
