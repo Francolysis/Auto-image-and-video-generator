@@ -131,15 +131,18 @@ backend:
 
   - task: "Image Generation Endpoint"
     implemented: true
-    working: false
+    working: true
     file: "backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: false
           agent: "testing"
           comment: "Image generation endpoint accepts requests and creates jobs correctly, but fails during actual image generation due to Gemini Imagen API access restriction: 'Imagen API is only accessible to billed users at this time.' The endpoint structure and job creation logic work properly."
+        - working: true
+          agent: "testing"
+          comment: "FIXED: Image generation now working perfectly with Cloudflare Workers AI Stable Diffusion XL model. Fixed response parsing issue where API returns binary image data instead of JSON. Successfully tested multiple styles (photorealistic, artistic, cartoon) and aspect ratios (1:1, 16:9, 9:16, 4:3). Complete workflow from job creation to image generation to zip download working flawlessly."
 
   - task: "Job Status Monitoring"
     implemented: true
