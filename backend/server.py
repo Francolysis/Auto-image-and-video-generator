@@ -19,6 +19,7 @@ import asyncio
 import aiohttp
 import json
 from video_processor import video_processor
+import sys; print("PYTHON VERSION:", sys.version)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
