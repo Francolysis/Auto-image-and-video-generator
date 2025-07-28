@@ -102,13 +102,18 @@ async def generate_single_image(prompt: str, style: str, aspect_ratio: str):
             json=payload
         ) as response:
             if response.status == 200:
-                result = await response.json()
-                if result.get("success") and result.get("result"):
-                    # The image is returned as base64 encoded data
-                    image_data = result["result"][0]  # First image from result
-                    return base64.b64decode(image_data)
+                content_type = response.headers.get('content-type', '')
+                if 'image/' in content_type:
+                    # Direct binary image response
+                    return await response.read()
                 else:
-                    raise Exception(f"API returned no image data: {result}")
+                    # JSON response with base64 encoded data
+                    result = await response.json()
+                    if result.get("success") and result.get("result"):
+                        image_data = result["result"][0]  # First image from result
+                        return base64.b64decode(image_data)
+                    else:
+                        raise Exception(f"API returned no image data: {result}")
             else:
                 error_text = await response.text()
                 raise Exception(f"Cloudflare API error {response.status}: {error_text}")
