@@ -6,15 +6,20 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 function App() {
+  const [activeTab, setActiveTab] = useState("images");
   const [csvFile, setCsvFile] = useState(null);
+  const [audioFile, setAudioFile] = useState(null);
   const [prompts, setPrompts] = useState([]);
+  const [textScript, setTextScript] = useState("");
   const [style, setStyle] = useState("photorealistic");
-  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [aspectRatio, setAspectRatio] = useState("16:9");
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
   const [downloadReady, setDownloadReady] = useState(false);
+  const [currentTask, setCurrentTask] = useState("");
   const fileInputRef = useRef(null);
+  const audioInputRef = useRef(null);
 
   const styles = [
     "photorealistic",
@@ -57,7 +62,14 @@ function App() {
     }
   };
 
-  const startGeneration = async () => {
+  const handleAudioUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setAudioFile(file);
+    }
+  };
+
+  const startImageGeneration = async () => {
     if (prompts.length === 0) {
       alert('Please upload a CSV file first');
       return;
@@ -66,6 +78,7 @@ function App() {
     setIsGenerating(true);
     setProgress(0);
     setDownloadReady(false);
+    setCurrentTask("Generating images...");
 
     try {
       const response = await axios.post(`${API}/generate-images`, {
@@ -77,10 +90,70 @@ function App() {
       const newJobId = response.data.job_id;
       setJobId(newJobId);
       
-      // Poll for progress
       pollJobStatus(newJobId);
     } catch (error) {
       alert('Error starting generation: ' + (error.response?.data?.detail || error.message));
+      setIsGenerating(false);
+    }
+  };
+
+  const startTextToVideo = async () => {
+    if (!textScript.trim()) {
+      alert('Please enter a script first');
+      return;
+    }
+
+    setIsGenerating(true);
+    setProgress(0);
+    setDownloadReady(false);
+    setCurrentTask("Processing script and generating video...");
+
+    try {
+      const response = await axios.post(`${API}/generate-text-to-video`, {
+        script: textScript,
+        style: style,
+        aspect_ratio: aspectRatio
+      });
+
+      const newJobId = response.data.job_id;
+      setJobId(newJobId);
+      
+      pollJobStatus(newJobId);
+    } catch (error) {
+      alert('Error starting video generation: ' + (error.response?.data?.detail || error.message));
+      setIsGenerating(false);
+    }
+  };
+
+  const startVoiceToVideo = async () => {
+    if (!audioFile) {
+      alert('Please upload an audio file first');
+      return;
+    }
+
+    setIsGenerating(true);
+    setProgress(0);
+    setDownloadReady(false);
+    setCurrentTask("Transcribing audio and generating video...");
+
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioFile);
+      formData.append('style', style);
+      formData.append('aspect_ratio', aspectRatio);
+
+      const response = await axios.post(`${API}/generate-voice-to-video`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const newJobId = response.data.job_id;
+      setJobId(newJobId);
+      
+      pollJobStatus(newJobId);
+    } catch (error) {
+      alert('Error starting voice-to-video: ' + (error.response?.data?.detail || error.message));
       setIsGenerating(false);
     }
   };
@@ -92,11 +165,13 @@ function App() {
         const status = response.data;
         
         setProgress(status.progress);
+        setCurrentTask(status.current_task || currentTask);
         
         if (status.status === 'completed') {
           clearInterval(interval);
           setIsGenerating(false);
           setDownloadReady(true);
+          setCurrentTask("Generation completed!");
         } else if (status.status === 'failed') {
           clearInterval(interval);
           setIsGenerating(false);
@@ -110,21 +185,30 @@ function App() {
     }, 2000);
   };
 
-  const downloadZip = () => {
+  const downloadResult = () => {
     if (jobId) {
-      window.open(`${API}/download/${jobId}`, '_blank');
+      const downloadUrl = activeTab === "images" 
+        ? `${API}/download/${jobId}`
+        : `${API}/download-video/${jobId}`;
+      window.open(downloadUrl, '_blank');
     }
   };
 
   const resetApp = () => {
     setCsvFile(null);
+    setAudioFile(null);
     setPrompts([]);
+    setTextScript("");
     setProgress(0);
     setJobId(null);
     setDownloadReady(false);
     setIsGenerating(false);
+    setCurrentTask("");
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+    if (audioInputRef.current) {
+      audioInputRef.current.value = '';
     }
   };
 
@@ -134,56 +218,163 @@ function App() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl md:text-6xl font-bold text-white mb-4">
-            🎬 YouTube Image Generator
+            🎬 AI Video Production Studio
           </h1>
-          <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-            Transform your storytelling prompts into stunning visuals. Upload your CSV, select your style, and generate professional images for your videos.
+          <p className="text-xl text-gray-300 max-w-3xl mx-auto">
+            Transform your ideas into stunning visuals and videos. Generate images from prompts, create videos from scripts, or turn your voice into animated stories.
           </p>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="max-w-4xl mx-auto mb-8">
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={() => setActiveTab("images")}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                activeTab === "images"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white/10 text-gray-300 hover:bg-white/20"
+              }`}
+            >
+              📸 Image Generation
+            </button>
+            <button
+              onClick={() => setActiveTab("text-to-video")}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                activeTab === "text-to-video"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white/10 text-gray-300 hover:bg-white/20"
+              }`}
+            >
+              📝 Text to Video
+            </button>
+            <button
+              onClick={() => setActiveTab("voice-to-video")}
+              className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                activeTab === "voice-to-video"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white/10 text-gray-300 hover:bg-white/20"
+              }`}
+            >
+              🎤 Voice to Video
+            </button>
+          </div>
         </div>
 
         {/* Main Content */}
         <div className="max-w-4xl mx-auto">
-          {/* Upload Section */}
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
-            <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
-              📁 Upload Your Prompts
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  id="csvInput"
-                />
-                <label
-                  htmlFor="csvInput"
-                  className="block w-full p-4 border-2 border-dashed border-white/30 rounded-lg text-center cursor-pointer hover:border-white/50 transition-colors"
-                >
-                  <div className="text-white">
-                    {csvFile ? (
-                      <span className="text-green-300">✅ {csvFile.name}</span>
-                    ) : (
-                      <span>Click to upload CSV file or drag and drop</span>
-                    )}
+          
+          {/* Image Generation Tab */}
+          {activeTab === "images" && (
+            <>
+              {/* Upload Section */}
+              <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
+                <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
+                  📁 Upload Your Prompts
+                </h2>
+                <div className="space-y-4">
+                  <div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="csvInput"
+                    />
+                    <label
+                      htmlFor="csvInput"
+                      className="block w-full p-4 border-2 border-dashed border-white/30 rounded-lg text-center cursor-pointer hover:border-white/50 transition-colors"
+                    >
+                      <div className="text-white">
+                        {csvFile ? (
+                          <span className="text-green-300">✅ {csvFile.name}</span>
+                        ) : (
+                          <span>Click to upload CSV file or drag and drop</span>
+                        )}
+                      </div>
+                    </label>
                   </div>
-                </label>
+                  
+                  {prompts.length > 0 && (
+                    <div className="bg-green-500/20 rounded-lg p-4">
+                      <p className="text-green-300 font-semibold">
+                        ✅ {prompts.length} prompts loaded successfully!
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
-              
-              {prompts.length > 0 && (
-                <div className="bg-green-500/20 rounded-lg p-4">
+            </>
+          )}
+
+          {/* Text to Video Tab */}
+          {activeTab === "text-to-video" && (
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
+              <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
+                📝 Enter Your Script
+              </h2>
+              <textarea
+                value={textScript}
+                onChange={(e) => setTextScript(e.target.value)}
+                placeholder="Enter your story script here. The AI will automatically detect scenes and generate corresponding images, then compile them into an animated video with transitions..."
+                className="w-full h-40 p-4 rounded-lg bg-white/20 text-white border border-white/30 focus:border-blue-400 focus:outline-none placeholder-gray-400 resize-none"
+              />
+              {textScript && (
+                <div className="mt-4 bg-green-500/20 rounded-lg p-4">
                   <p className="text-green-300 font-semibold">
-                    ✅ {prompts.length} prompts loaded successfully!
+                    ✅ Script ready for video generation!
                   </p>
                 </div>
               )}
             </div>
-          </div>
+          )}
+
+          {/* Voice to Video Tab */}
+          {activeTab === "voice-to-video" && (
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
+              <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
+                🎤 Upload Your Audio
+              </h2>
+              <div className="space-y-4">
+                <div>
+                  <input
+                    ref={audioInputRef}
+                    type="file"
+                    accept=".mp3,.wav,.m4a,.ogg"
+                    onChange={handleAudioUpload}
+                    className="hidden"
+                    id="audioInput"
+                  />
+                  <label
+                    htmlFor="audioInput"
+                    className="block w-full p-4 border-2 border-dashed border-white/30 rounded-lg text-center cursor-pointer hover:border-white/50 transition-colors"
+                  >
+                    <div className="text-white">
+                      {audioFile ? (
+                        <span className="text-green-300">✅ {audioFile.name}</span>
+                      ) : (
+                        <span>Click to upload audio file (MP3, WAV, M4A, OGG)</span>
+                      )}
+                    </div>
+                  </label>
+                </div>
+                
+                {audioFile && (
+                  <div className="bg-green-500/20 rounded-lg p-4">
+                    <p className="text-green-300 font-semibold">
+                      ✅ Audio file ready for transcription and video generation!
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Settings Section */}
-          {prompts.length > 0 && (
+          {(activeTab === "images" && prompts.length > 0) || 
+           (activeTab === "text-to-video" && textScript) || 
+           (activeTab === "voice-to-video" && audioFile) ? (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
               <h2 className="text-2xl font-bold text-white mb-6 flex items-center">
                 🎨 Generation Settings
@@ -208,7 +399,9 @@ function App() {
 
                 {/* Aspect Ratio Selection */}
                 <div>
-                  <label className="block text-white font-semibold mb-3">Aspect Ratio</label>
+                  <label className="block text-white font-semibold mb-3">
+                    {activeTab === "images" ? "Aspect Ratio" : "Video Aspect Ratio"}
+                  </label>
                   <select
                     value={aspectRatio}
                     onChange={(e) => setAspectRatio(e.target.value)}
@@ -216,35 +409,43 @@ function App() {
                   >
                     {aspectRatios.map((ratio) => (
                       <option key={ratio} value={ratio} className="bg-gray-800">
-                        {ratio}
+                        {ratio} {ratio === "16:9" ? "(YouTube)" : ratio === "9:16" ? "(Stories)" : ""}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Generation Section */}
-          {prompts.length > 0 && (
+          {((activeTab === "images" && prompts.length > 0) || 
+            (activeTab === "text-to-video" && textScript) || 
+            (activeTab === "voice-to-video" && audioFile)) && (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8 border border-white/20">
               <h2 className="text-2xl font-bold text-white mb-6 flex items-center">
-                🚀 Generate Images
+                🚀 Generate Content
               </h2>
               
               {!isGenerating && !downloadReady && (
                 <button
-                  onClick={startGeneration}
+                  onClick={
+                    activeTab === "images" ? startImageGeneration :
+                    activeTab === "text-to-video" ? startTextToVideo :
+                    startVoiceToVideo
+                  }
                   className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold py-4 px-8 rounded-lg hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200 shadow-lg"
                 >
-                  🎨 Generate {prompts.length} Images
+                  {activeTab === "images" ? `🎨 Generate ${prompts.length} Images` :
+                   activeTab === "text-to-video" ? "🎬 Generate Video from Script" :
+                   "🎤 Generate Video from Voice"}
                 </button>
               )}
 
               {isGenerating && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between text-white">
-                    <span>Generating images...</span>
+                    <span>{currentTask}</span>
                     <span>{progress}%</span>
                   </div>
                   <div className="w-full bg-white/20 rounded-full h-3">
@@ -254,7 +455,9 @@ function App() {
                     ></div>
                   </div>
                   <p className="text-gray-300 text-center">
-                    This may take a few minutes. Please don't close this page.
+                    {activeTab === "images" ? 
+                      "This may take a few minutes. Please don't close this page." :
+                      "Video generation may take several minutes. Please be patient."}
                   </p>
                 </div>
               )}
@@ -267,16 +470,16 @@ function App() {
                       Generation Complete!
                     </h3>
                     <p className="text-green-200">
-                      Your {prompts.length} images are ready for download.
+                      Your {activeTab === "images" ? `${prompts.length} images are` : "video is"} ready for download.
                     </p>
                   </div>
                   
                   <div className="flex space-x-4">
                     <button
-                      onClick={downloadZip}
+                      onClick={downloadResult}
                       className="flex-1 bg-gradient-to-r from-green-600 to-teal-600 text-white font-bold py-4 px-8 rounded-lg hover:from-green-700 hover:to-teal-700 transform hover:scale-105 transition-all duration-200 shadow-lg"
                     >
-                      📥 Download ZIP File
+                      📥 Download {activeTab === "images" ? "ZIP File" : "Video"}
                     </button>
                     <button
                       onClick={resetApp}
@@ -291,7 +494,7 @@ function App() {
           )}
 
           {/* Prompts Preview */}
-          {prompts.length > 0 && (
+          {activeTab === "images" && prompts.length > 0 && (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
               <h3 className="text-xl font-bold text-white mb-4">
                 📝 Loaded Prompts ({prompts.length})
